@@ -1,0 +1,9 @@
+name: clone3
+description: Demo Clone 3 (the "short timelines" reference)
+mode: clone
+ref_audio: ref_audio.wav
+ref_text: "I'm confused why some people have super short timelines, yet at the same time are bullish on scaling up reinforcement learning atop LLMs. If we're actually close to a human-like learner, then this whole approach of training on verifiable outcomes is doomed."
+xvec_only: true
+language: English
+temperature: 0.7
+top_p: 0.95

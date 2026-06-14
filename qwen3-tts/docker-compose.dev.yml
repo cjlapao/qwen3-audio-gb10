@@ -1,0 +1,58 @@
+# ==============================================================================
+# Development — build from source Dockerfiles locally
+# ==============================================================================
+# Usage:
+#   docker compose --file docker-compose.dev.yml up -d
+#
+# Override defaults via environment or .env file:
+#   TTS_MODEL_BASE=...  TTS_MODEL_CUSTOM=...  TTS_MODEL_DESIGN=...
+#   TTS_HOST_PORT=...  TTS_UI_HOST_PORT=...
+# ==============================================================================
+
+services:
+  qwen3-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FASTER_QWEN3_TTS_REF: "0.2.6"
+        TRANSFORMERS_VERSION: "4.57.3"
+        TORCHAUDIO_VERSION: "2.9.1"
+    container_name: qwen3-tts
+    ports:
+      - "${TTS_HOST_PORT:-8005}:8000"
+    environment:
+      - HF_HOME=/models
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - CUDA_VISIBLE_DEVICES=0
+      - VOICES_ROOT=/app/voices
+      - MODEL_BASE=${TTS_MODEL_BASE:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}
+      - MODEL_CUSTOM=${TTS_MODEL_CUSTOM:-Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice}
+      - MODEL_DESIGN=${TTS_MODEL_DESIGN:-Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign}
+    volumes:
+      - ../models:/models
+      - ./voices:/app/voices
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # NGC's recommended PyTorch container settings
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        tag: "qwen3-tts"
+        syslog-facility: "local6"

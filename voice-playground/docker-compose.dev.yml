@@ -1,0 +1,32 @@
+# ==============================================================================
+# Development — build from source Dockerfile locally
+# ==============================================================================
+# Usage:
+#   docker compose --file docker-compose.dev.yml up -d
+#
+# Override defaults via environment or .env file:
+#   TTS_BASE=...  HOST_PORT=...
+# ==============================================================================
+
+services:
+  voice-playground:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voice-playground
+    ports:
+      - "${PLAYGROUND_HOST_PORT:-8006}:7860"
+    environment:
+      - TTS_BASE=${TTS_BASE_URL:-http://qwen3-tts:8000}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7860/').close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        tag: "voice-playground"
+        syslog-facility: "local6"

@@ -1,0 +1,16 @@
+sync:
+  defaults:
+    mode: "two-way-resolved"
+    ignore:
+      vcs: true
+      paths:
+        - "node_modules"
+        - "dist"
+        - "build"
+        - ".venv"
+        - "venv"
+        - ".terraform"
+
+  development:
+    alpha: "/home/cjlapao/code/cjlapao/qwen3-asr-tts-gb10"
+    beta: "cjlapao@jarvis.homelab.local:/home/cjlapao/code/cjlapao/qwen3-asr-tts-gb10"

@@ -1,0 +1,39 @@
+name: jarvis
+mode: clone
+description: ''
+language: English
+ref_audio: ref_audio.wav
+ref_text: Display. Accessing bonus features. Calibrating settings and\n playback.
+  Accessing deleted scenes.\n Playback initiated. Disabling voice commands during\n
+  playback. Languages. Pausing playback.\n Pop-up menu accessed. The settings are
+  now available. Setup\n. Deactivating subtitles. Activating subtitles.\n Top menu
+  accessed.\n Camera disabled. Camera activated. Accessing alarm and\n interface settings.\n
+  In this window you can set up your customized greeting and\n alarm preferences.\n
+  Accessing chronographic display. Still plenty of time to\n save the day.\n Please
+  make the most of it. Please indicate a time.\n An AM or PM. Alarm cancelled. Daily
+  it is.\n Alarm set for \"Thank you, the alarm is set.\" Enjoy your\n delay of the
+  inevitable.\n Per your request, here is your reminder.\n There is a matter that
+  requires your immediate attention.\n The world needs your expertise. Or at least
+  your presence.\n We appear to be at an impasse. You wish to sleep, but it is\n my
+  duty to wake you.\n Ample time to prepare for your scheduled event. One hopes.\n
+  We appear to be at an impasse.\n This is my third attempt to wake you. Perhaps I
+  should just\n cancel the alarm. Maybe you should have chosen a later time\n because
+  clearly you don't want to get up.\n I am afraid your time to rest is at an end.
+  I must insist\n that you wake up. Please wake up ma'am. Please wake up sir.\n Here's
+  some music to start your day. I apologize for the\n disturbance but it's time for
+  you to wake up.\n Here is my attempt to wake you. Weekdays it is.\n AM. Accessing
+  chronographic display. If you're having\n trouble sleeping, might I suggest a soothing
+  herbal tea.\n Hopefully you're enjoying a night on the town. Please let\n me know
+  if I can be of any assistance.\n I see that we're burning the midnight oil. Don't
+  work too\n hard ma'am.\n I see that we're burning the midnight oil. Don't work too\n
+  hard sir.\n I see we are burning the midnight oil. Don't work too hard.\n Noon o'clock
+  PM. There is a matter that requires your\n immediate attention. May I remind you
+  that you have a\n meeting to attend.\n There is an on-screen alert. Your presence
+  is on the ground\n.\n
+xvec_only: true
+speaker: null
+instruct: null
+temperature: 0.7
+top_p: 0.95
+non_streaming_mode: null
+append_silence: true

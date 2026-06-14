@@ -1,0 +1,9 @@
+name: clone1
+description: Demo Clone 1 (the "teddy bear" reference)
+mode: clone
+ref_audio: ref_audio.wav
+ref_text: "Don't be deceived by the name. There is nothing cuddly about this particular teddy bear. In fact, it's the most dangerous plant in the desert."
+xvec_only: true
+language: English
+temperature: 0.7
+top_p: 0.95
