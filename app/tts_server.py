@@ -1,5 +1,5 @@
-# tts_server.py
 import io
+import os
 import wave
 import numpy as np
 import torch
@@ -11,19 +11,45 @@ from typing import Optional
 from faster_qwen3_tts import FasterQwen3TTS
 from voice_store import VoiceStore, Voice
 
-import os
 MODEL_BASE   = os.getenv("MODEL_BASE",   "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
 MODEL_CUSTOM = os.getenv("MODEL_CUSTOM", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
 MODEL_DESIGN = os.getenv("MODEL_DESIGN", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
 
+print(f"[tts] booting; voice store at {os.getenv('VOICES_ROOT', '/app/voices')}", flush=True)
 store = VoiceStore()
+print(f"[tts] loaded {len(store.list_names())} voices: {store.list_names()}", flush=True)
+
 _models: dict[str, FasterQwen3TTS] = {}
+
 
 def get_model(kind):
     if kind not in _models:
         ids = {"clone": MODEL_BASE, "custom": MODEL_CUSTOM, "design": MODEL_DESIGN}
+        print(f"[tts] lazy-loading {kind} model: {ids[kind]}", flush=True)
         _models[kind] = FasterQwen3TTS.from_pretrained(ids[kind])
+        print(f"[tts] {kind} model ready", flush=True)
     return _models[kind]
+
+
+def add_natural_tail(audio: np.ndarray, sr: int, tail_ms: int = 250) -> np.ndarray:
+    """Pad the end with matched ambient noise so chunk transitions don't have
+    abrupt silence cliffs when a client (e.g. OpenWebUI) concatenates them."""
+    last_samples = int(sr * 0.1)
+    if len(audio) < last_samples:
+        return audio
+    tail = audio[-last_samples:]
+    sorted_abs = np.sort(np.abs(tail))
+    noise_level = sorted_abs[int(len(sorted_abs) * 0.2)] * 0.6
+    tail_samples = int(sr * tail_ms / 1000)
+    tail_noise = np.random.normal(0, noise_level, tail_samples).astype(np.float32)
+    fade = int(sr * 0.02)
+    if fade > 0 and len(tail_noise) > 2 * fade:
+        ramp_in = np.linspace(0, 1, fade)
+        ramp_out = np.linspace(1, 0, fade)
+        tail_noise[:fade] *= ramp_in
+        tail_noise[-fade:] *= ramp_out
+    return np.concatenate([audio, tail_noise])
+
 
 def to_wav(audio, sr):
     if isinstance(audio, list):
@@ -35,12 +61,14 @@ def to_wav(audio, sr):
     pcm = np.clip(audio * 32768, -32768, 32767).astype(np.int16)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
-        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
         w.writeframes(pcm.tobytes())
     return buf.getvalue()
 
+
 def synthesize(voice: Voice, text: str, overrides: dict | None = None) -> bytes:
-    """Generate audio from a Voice using its stored recipe, with optional overrides."""
     o = overrides or {}
     temperature = o.get("temperature", voice.temperature)
     top_p = o.get("top_p", voice.top_p)
@@ -53,15 +81,13 @@ def synthesize(voice: Voice, text: str, overrides: dict | None = None) -> bytes:
         if voice.speaker_pt:
             try:
                 spk_emb = torch.load(voice.speaker_pt, weights_only=True).to(model.device)
-                # Sanity check: the codec expects 1024-dim embeddings.
-                # If we cached something larger (mode change leftover), bin it.
                 if spk_emb.numel() != 1024 and spk_emb.shape[-1] != 1024:
-                    print(f"stale embedding for '{voice.name}' "
+                    print(f"[tts] stale embedding for '{voice.name}' "
                           f"(shape {tuple(spk_emb.shape)}), regenerating", flush=True)
                     os.unlink(voice.speaker_pt)
                     spk_emb = None
             except Exception as e:
-                print(f"failed to load cached embedding for '{voice.name}': {e}", flush=True)
+                print(f"[tts] failed to load cached embedding for '{voice.name}': {e}", flush=True)
                 spk_emb = None
 
         if spk_emb is not None:
@@ -95,32 +121,12 @@ def synthesize(voice: Voice, text: str, overrides: dict | None = None) -> bytes:
         )
     else:
         raise ValueError(f"unknown voice mode: {voice.mode}")
+
     return to_wav(audio, sr)
 
-def add_natural_tail(audio: np.ndarray, sr: int, tail_ms: int = 250) -> np.ndarray:
-    """Pad the end of audio with matched ambient noise so chunk transitions
-    don't have abrupt silence cliffs."""
-    # Sample the last 100ms to estimate ambient level
-    last_samples = int(sr * 0.1)
-    if len(audio) < last_samples:
-        return audio
-    # Estimate noise floor from quietest 20% of the tail
-    tail = audio[-last_samples:]
-    sorted_abs = np.sort(np.abs(tail))
-    noise_level = sorted_abs[int(len(sorted_abs) * 0.2)] * 0.6  # gentle floor
-    # Generate matched white noise tail
-    tail_samples = int(sr * tail_ms / 1000)
-    tail_noise = np.random.normal(0, noise_level, tail_samples).astype(np.float32)
-    # Fade in/out so it joins smoothly
-    fade = int(sr * 0.02)  # 20ms fade
-    if fade > 0 and len(tail_noise) > 2 * fade:
-        ramp_in = np.linspace(0, 1, fade)
-        ramp_out = np.linspace(1, 0, fade)
-        tail_noise[:fade] *= ramp_in
-        tail_noise[-fade:] *= ramp_out
-    return np.concatenate([audio, tail_noise])
 
 app = FastAPI()
+
 
 # ============== OpenAI-compatible endpoint ==============
 class OpenAISpeechRequest(BaseModel):
@@ -128,6 +134,7 @@ class OpenAISpeechRequest(BaseModel):
     input: str
     voice: str
     response_format: str = "wav"
+
 
 @app.post("/v1/audio/speech")
 def openai_speech(req: OpenAISpeechRequest):
@@ -137,23 +144,26 @@ def openai_speech(req: OpenAISpeechRequest):
     audio = synthesize(voice, req.input)
     return Response(content=audio, media_type=f"audio/{req.response_format}")
 
+
 @app.get("/v1/audio/voices")
 def openai_voices():
     return {"voices": store.list_names()}
+
 
 @app.get("/v1/models")
 def openai_models():
     return {"data": [{"id": "tts-1", "object": "model"}]}
 
+
 # ============== Rich API for playground ==============
 class GenerateRequest(BaseModel):
     voice: str
     text: str
-    # Optional per-request overrides — anything in voice.yaml can be overridden here
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     instruct: Optional[str] = None
     language: Optional[str] = None
+
 
 @app.post("/tts/generate")
 def tts_generate(req: GenerateRequest):
@@ -164,27 +174,28 @@ def tts_generate(req: GenerateRequest):
     audio = synthesize(voice, req.text, overrides=overrides)
     return Response(content=audio, media_type="audio/wav")
 
+
 @app.get("/tts/voices")
 def list_voices():
     return store.list_voices()
+
 
 @app.get("/tts/voices/{name}")
 def get_voice(name: str):
     v = store.get(name)
     if not v:
         raise HTTPException(404)
-    return {k: v for k, v in v.__dict__.items() if k != "dir"}
+    return {k: val for k, val in v.__dict__.items() if k != "dir"}
+
 
 @app.post("/tts/voices/{name}/save")
 def save_voice_recipe(name: str, body: dict):
-    """Save voice metadata (without changing the ref_audio file)."""
     existing = store.get(name)
     data = {**(existing.__dict__ if existing else {}), **body, "name": name}
     data.pop("dir", None)
     data.pop("speaker_pt", None)
     v = Voice(**data)
     store.save_voice(v)
-    # If parameters changed in a way that affects embedding, drop the cache
     cached = store.root / name / "speaker.pt"
     if cached.exists() and existing and (
         existing.ref_audio != v.ref_audio or existing.xvec_only != v.xvec_only
@@ -192,10 +203,10 @@ def save_voice_recipe(name: str, body: dict):
         cached.unlink()
     return {"ok": True}
 
+
 @app.post("/tts/voices/{name}/upload_audio")
 def upload_ref_audio(name: str, file: UploadFile = File(...), ref_text: str = Form(""),
                      xvec_only: bool = Form(True), description: str = Form("")):
-    """Create or replace a clone voice with new reference audio."""
     voice = Voice(
         name=name, mode="clone",
         ref_audio="ref_audio.wav", ref_text=ref_text,
@@ -203,11 +214,58 @@ def upload_ref_audio(name: str, file: UploadFile = File(...), ref_text: str = Fo
     )
     audio_bytes = file.file.read()
     store.save_voice(voice, ref_audio_bytes=audio_bytes)
-    # Drop any old embedding cache
     cached = store.root / name / "speaker.pt"
     if cached.exists():
         cached.unlink()
     return {"ok": True, "voice": name}
+
+
+# ============== One-shot generation (no voice library entry) ==============
+class OneshotRequest(BaseModel):
+    mode: str                              # "design" | "custom" | "clone"
+    text: str
+    instruct: Optional[str] = None         # required for design, optional for others
+    speaker: Optional[str] = None          # required for custom (preset speaker id)
+    ref_audio: Optional[str] = None        # required for clone (absolute path or relative to /app/voices)
+    ref_text: str = ""                     # used by clone in ICL mode
+    xvec_only: bool = True                 # used by clone
+    language: str = "English"
+    temperature: float = 0.7
+    top_p: float = 0.95
+
+
+@app.post("/tts/generate-oneshot")
+def generate_oneshot(req: OneshotRequest):
+    """Generate audio without saving anything to the voice library.
+
+    Useful for the playground's 'try before you commit' workflow — design or
+    custom-voice experimentation that hasn't earned a permanent voice slot yet.
+    """
+    if req.mode not in ("design", "custom", "clone"):
+        raise HTTPException(400, f"mode must be design|custom|clone, got '{req.mode}'")
+
+    if req.mode == "design" and not req.instruct:
+        raise HTTPException(400, "design mode requires 'instruct'")
+    if req.mode == "custom" and not req.speaker:
+        raise HTTPException(400, "custom mode requires 'speaker'")
+    if req.mode == "clone" and not req.ref_audio:
+        raise HTTPException(400, "clone mode requires 'ref_audio'")
+
+    # Build an ephemeral Voice that's never saved
+    voice = Voice(
+        name="_oneshot",
+        mode=req.mode,
+        instruct=req.instruct,
+        speaker=req.speaker,
+        ref_audio=req.ref_audio,
+        ref_text=req.ref_text,
+        xvec_only=req.xvec_only,
+        language=req.language,
+        temperature=req.temperature,
+        top_p=req.top_p,
+    )
+    audio = synthesize(voice, req.text)
+    return Response(content=audio, media_type="audio/wav")
 
 @app.post("/tts/reload")
 def reload():

@@ -20,70 +20,42 @@
 # ==============================================================================
 
 services:
-  # ──────────────────────────────────────────────────────────────────────────
-  # ASR — Speech-to-text (always starts)
-  # ──────────────────────────────────────────────────────────────────────────
-  qwen3-asr:
-    image: ${IMAGE_PREFIX:-ghcr.io/cjlapao}/qwen3-asr-gb10:${IMAGE_TAG:-latest}
-    container_name: qwen3-asr
+  qwen3-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FASTER_QWEN3_TTS_REF: "0.2.6"
+        TRANSFORMERS_VERSION: "4.57.3"
+        TORCHAUDIO_VERSION: "2.9.1"
+    image: cjlapao/qwen3-audio-gb10:latest
+    container_name: qwen3-tts
     ports:
-      - "${ASR_HOST_PORT:-8004}:8000"
+      - "8005:8000"
     environment:
-      - MODEL_ID=${ASR_MODEL_ID:-Qwen/Qwen3-ASR-1.7B}
+      - SERVICE_MODE=tts
       - HF_HOME=/models
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - CUDA_VISIBLE_DEVICES=0
+      - VOICES_ROOT=/app/voices
     volumes:
-      - ./models:/models
+      - ../models:/models
+      - ./voices:/app/voices
     deploy:
       resources:
         reservations:
           devices:
             - { driver: nvidia, count: all, capabilities: [gpu] }
     ipc: host
-    ulimits: { memlock: -1, stack: 67108864 }
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/v1/models"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 240s
-    restart: unless-stopped
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # TTS — Text-to-speech API (always starts)
-  # ──────────────────────────────────────────────────────────────────────────
-  qwen3-tts:
-    image: ${IMAGE_PREFIX:-ghcr.io/cjlapao}/qwen3-tts-gb10:${IMAGE_TAG:-latest}
-    container_name: qwen3-tts
-    ports:
-      - "${TTS_HOST_PORT:-8005}:8000"
-    environment:
-      - HF_HOME=/models
-      - HF_HUB_ENABLE_HF_TRANSFER=1
-      - CUDA_VISIBLE_DEVICES=0
-      - VOICES_ROOT=/app/voices
-      - MODEL_BASE=${TTS_MODEL_BASE:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}
-      - MODEL_CUSTOM=${TTS_MODEL_CUSTOM:-Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice}
-      - MODEL_DESIGN=${TTS_MODEL_DESIGN:-Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign}
-    volumes:
-      - ./models:/models
-      - ./qwen3-tts/voices:/app/voices
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    ipc: host
     ulimits:
       memlock: -1
       stack: 67108864
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/docs"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/v1/audio/voices"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 180s
+      start_period: 240s
     restart: unless-stopped
     logging:
       driver: syslog
@@ -91,6 +63,40 @@ services:
         tag: "qwen3-tts"
         syslog-facility: "local6"
 
+  qwen3-asr:
+    image: cjlapao/qwen3-audio-gb10:latest
+    container_name: qwen3-asr
+    ports:
+      - "8004:8000"
+    environment:
+      - SERVICE_MODE=asr
+      - MODEL_BASE=Qwen/Qwen3-ASR-1.7B
+      - HF_HOME=/models
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ../models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - { driver: nvidia, count: all, capabilities: [gpu] }
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 600s
+    restart: unless-stopped
+    logging:
+      driver: syslog
+      options:
+        tag: "qwen3-asr"
+        syslog-facility: "local6"
   # ──────────────────────────────────────────────────────────────────────────
   # Voice Playground — Gradio UI (opt-in via --profile playground)
   # ──────────────────────────────────────────────────────────────────────────
