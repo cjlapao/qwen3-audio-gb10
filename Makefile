@@ -1,142 +1,81 @@
 # ==============================================================================
-# Makefile for building and publishing qwen3-audio-gb10 containers
+# Makefile for building and publishing qwen3-asr-tts-gb10 containers
+#   Multi-arch — same VERSION tag -> OCI manifest list: linux/arm64 + linux/amd64
+#     Docker resolves the correct arch at pull time automatically.
 # ==============================================================================
-#
-# Targets:
-#   make build         — Build all images (unified audio + playground)
-#   make build-audio   — Build qwen3-audio-gb10 (unified ASR+TTS image)
-#   make build-play    — Build voice-playground only
-#   make push          — Push all images to ghcr.io
-#   make push-audio    — Push qwen3-audio-gb10 to ghcr.io
-#   make push-play     — Push voice-playground to ghcr.io
-#   make push-one=AUDIO|PLAY — Push a single image
-#   make clean         — Remove built images
-#   make help          — Show this help
-#
-# Variables (override on command line, e.g. make PUSH_REPO=ghcr.io/myorg):
-#   PUSH_REPO   — Target registry prefix (default: ghcr.io/cjlapao)
-#   VERSION     — Image version tag (default: git short SHA)
-#
-# Prerequisites:
-#   - Docker installed and running
-#   - Logged into ghcr.io:  docker login ghcr.io -u <user> -p <token>
-#   - NVIDIA GPU + nvidia-container-toolkit (for audio image)
-# ==============================================================================
-
-# ── Registry & version ────────────────────────────────────────────────────────
 
 PUSH_REPO   ?= ghcr.io/cjlapao
-VERSION     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+VERSION       ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
-# ── Image definitions ─────────────────────────────────────────────────────────
+REGISTRY_AUDIO = ghcr.io/cjlapao/qwen3-audio-gb10
+REGISTRY_PLAY  = ghcr.io/cjlapao/voice-playground
 
-AUDIO_DIR   := .
-PLAY_DIR    := voice-playground
+AUDIO_DIR := .
+PLAY_DIR  := voice-playground
 
-AUDIO_NAME  := $(PUSH_REPO)/qwen3-audio-gb10
-PLAY_NAME   := $(PUSH_REPO)/voice-playground
+# Multi-platform build requires a containerd-backed builder.
+# We use --builder to pin it so it works even if "docker" is the default.
+BUILD_CMD := docker buildx build --builder multi-arch-builder --platform linux/arm64,linux/amd64 --push
 
-# ── Audio build args ──────────────────────────────────────────────────────────
+.PHONY: builder setup build build-audio play-build push clean help
 
-AUDIO_ARGS  := \
-	--build-arg FASTER_QWEN3_TTS_REF=0.2.6 \
-	--build-arg TRANSFORMERS_VERSION=4.57.3 \
-	--build-arg TORCHAUDIO_VERSION=2.9.1
+builder:
+	@echo ">>> Creating buildx builder with containerd driver..."
+	docker buildx create --name multi-arch-builder --driver docker-container 2>/dev/null || true
+	docker buildx inspect multi-arch-builder --bootstrap
 
-# ── Helper: tag & push helper ─────────────────────────────────────────────────
-# Usage: $(call tag_and_push,NAME,TAG,DEST_NAME)
-#   NAME:TAG → DEST_NAME:TAG, then DEST_NAME:TAG → DEST_NAME:latest
-# ──────────────────────────────────────────────────────────────────────────────
+setup: builder
 
-define tag_and_push
-	docker tag $(1):$(2) $(3):$(2)
-	docker push $(3):$(2)
-	docker tag $(3):$(2) $(3):latest
-	docker push $(3):latest
-endef
-
-# ── Build targets ─────────────────────────────────────────────────────────────
-
-.PHONY: build build-audio build-play clean help push push-audio push-play push-one
-
-build: build-audio build-play
+build: setup build-audio play-build
 	@echo ""
-	@echo "=== All images built successfully ==="
-	@echo "  $(AUDIO_NAME):$(VERSION)"
-	@echo "  $(PLAY_NAME):$(VERSION)"
+	@echo "*** Multi-arch build complete ***"
 
 build-audio:
-	@echo ">>> Building $(AUDIO_NAME):$(VERSION) ..."
-	docker build $(AUDIO_ARGS) -t $(AUDIO_NAME):$(VERSION) $(AUDIO_DIR)
-	@echo ">>> Done: $(AUDIO_NAME):$(VERSION)"
+	@echo "[Audio]"
+	$(BUILD_CMD) \
+		--tag $(REGISTRY_AUDIO):$(VERSION) \
+		--label="org.opencontainers.image.source=https://github.com/cjlapao/qwen3-asr-tts-gb10" \
+		--label="org.opencontainers.image.description=Qwen3 Audio GB10 ASR+TTS unified container" \
+		--build-arg FASTER_QWEN3_TTS_REF=0.2.6 \
+		--build-arg TRANSFORMERS_VERSION=4.57.3 \
+		--build-arg TORCHAUDIO_VERSION=2.9.1 \
+		$(AUDIO_DIR)
 
-build-play:
-	@echo ">>> Building $(PLAY_NAME):$(VERSION) ..."
-	docker build -t $(PLAY_NAME):$(VERSION) $(PLAY_DIR)
-	@echo ">>> Done: $(PLAY_NAME):$(VERSION)"
+play-build:
+	@echo "[Playground]"
+	$(BUILD_CMD) \
+		--tag $(REGISTRY_PLAY):$(VERSION) \
+		--label="org.opencontainers.image.source=https://github.com/cjlapao/qwen3-asr-tts-gb10" \
+		$(PLAY_DIR)
 
-# ── Push targets ──────────────────────────────────────────────────────────────
-
-push: push-audio push-play
-	@echo ""
-	@echo "=== All images pushed to $(PUSH_REPO) ==="
-
-push-audio:
-	@echo ">>> Pushing $(AUDIO_NAME):$(VERSION) ..."
-	$(call tag_and_push,$(AUDIO_NAME),$(VERSION),$(AUDIO_NAME))
-	@echo ">>> Done."
-
-push-play:
-	@echo ">>> Pushing $(PLAY_NAME):$(VERSION) ..."
-	$(call tag_and_push,$(PLAY_NAME),$(VERSION),$(PLAY_NAME))
-	@echo ">>> Done."
-
-# Single-image push: make push-one=AUDIO|PLAY
-push-one:
-	@if [ "$(ONE)" = "AUDIO" ]; then \
-		echo ">>> Pushing $(AUDIO_NAME):$(VERSION) ..."; \
-		$(call tag_and_push,$(AUDIO_NAME),$(VERSION),$(AUDIO_NAME)); \
-		echo ">>> Done."; \
-	elif [ "$(ONE)" = "PLAY" ]; then \
-		echo ">>> Pushing $(PLAY_NAME):$(VERSION) ..."; \
-		$(call tag_and_push,$(PLAY_NAME),$(VERSION),$(PLAY_NAME)); \
-		echo ">>> Done."; \
-	else \
-		echo "ERROR: push-one requires ONE=AUDIO|PLAY"; \
-		exit 1; \
-	fi
-
-# ── Clean ─────────────────────────────────────────────────────────────────────
+push:
+	@echo "*** Pushing all images ***"
+	docker push $(REGISTRY_AUDIO):$(VERSION) && docker push $(REGISTRY_AUDIO):latest
+	docker push $(REGISTRY_PLAY):$(VERSION) && docker push $(REGISTRY_PLAY):latest
+	@echo "== All pushed =="
 
 clean:
-	@echo ">>> Removing built images ..."
-	docker rmi $(AUDIO_NAME):$(VERSION) $(AUDIO_NAME):latest 2>/dev/null || true
-	docker rmi $(PLAY_NAME):$(VERSION) $(PLAY_NAME):latest 2>/dev/null || true
-	@echo ">>> Done."
-
-# ── Help ──────────────────────────────────────────────────────────────────────
+	@echo "--- Removing ALL cached images ---"
+	docker rmi $(REGISTRY_AUDIO):$(VERSION) 2>/dev/null || true
+	docker rmi $(REGISTRY_AUDIO):latest 2>/dev/null || true
+	docker rmi $(REGISTRY_PLAY):$(VERSION) 2>/dev/null || true
+	docker rmi $(REGISTRY_PLAY):latest 2>/dev/null || true
 
 help:
-	@echo "Usage: make [target]"
+	@echo "Usage: make [target] [VERSION=x.x.x]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build           Build all images"
-	@echo "  build-audio     Build unified ASR+TTS image only"
-	@echo "  build-play      Build playground image only"
-	@echo "  push            Push all images to ghcr.io"
-	@echo "  push-audio      Push audio image to ghcr.io"
-	@echo "  push-play       Push playground to ghcr.io"
-	@echo "  push-one=AUDIO  Push audio only (also: PLAY)"
-	@echo "  clean           Remove built images"
-	@echo "  help            Show this help"
+	@echo "  build         Build AND PUSH mult-arch (arm64+amd64) for ALL apps"
+	@echo "  build-audio   Build only: audio, mult-arch (no push)"
+	@echo "  play-build    Build only: playground, mult-arch (no push)"
+	@echo "  push          Re-push already-built images via docker push"
+	@echo "  clean         Remove ALL tagged images from local docker cache"
+	@echo "  help          This help"
 	@echo ""
-	@echo "Variables (override on command line):"
-	@echo "  PUSH_REPO=<registry>   Target registry prefix (default: ghcr.io/cjlapao)"
-	@echo "  VERSION=<tag>          Image version tag (default: git short SHA)"
+	@echo "Multi-arch means one VERSION tag produces an OCI manifest list"
+	@echo "bundling BOTH arm64 and amd64 layers. Docker picks the right one."
 	@echo ""
 	@echo "Examples:"
-	@echo "  make build                  # Build all images"
-	@echo "  make build push             # Build & push all images"
-	@echo "  make push-one=AUDIO         # Push audio only"
-	@echo "  make VERSION=v1.0.0 build   # Build with version tag"
-	@echo "  make PUSH_REPO=ghcr.io/myuser build   # Custom registry"
+	@echo "  make build                      # Build + Push all mult-arch"
+	@echo "  make VERSION=v2.1.0 build       # Tag v2.1.0 instead of git SHA"
+	@echo "  make push                       # Push again (images must be built first)"

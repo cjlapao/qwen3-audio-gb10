@@ -97,6 +97,7 @@ RUN python -c "import torch, torchaudio; print('torch', torch.__version__, 'torc
 # ------------------------------------------------------------------
 WORKDIR /app
 COPY app/ /app/
+ENV PYTHONPATH=/app
 
 # Copy the default ref audio from the faster-qwen3-tts repo for fallback
 RUN cp /opt/faster-qwen3-tts/ref_audio.wav /app/default_ref.wav
